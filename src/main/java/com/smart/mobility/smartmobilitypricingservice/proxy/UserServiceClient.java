@@ -1,12 +1,13 @@
 package com.smart.mobility.smartmobilitypricingservice.proxy;
 
+import com.smart.mobility.smartmobilitypricingservice.dto.UserMobilitySummaryDTO;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
-@FeignClient(name = "user-service", url = "${user-service.url:http://localhost:8081}")
+@FeignClient(name = "user-mobility-pass-service")
 public interface UserServiceClient {
 
-    @GetMapping("/internal/subscriptions/{userId}")
-    String getActiveSubscription(@PathVariable("userId") Long userId);
+    @GetMapping("/api/users/summary/{keycloakId}")
+    UserMobilitySummaryDTO getUserSummary(@PathVariable("keycloakId") String keycloakId);
 }
