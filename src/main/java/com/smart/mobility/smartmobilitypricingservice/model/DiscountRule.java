@@ -32,7 +32,7 @@ public class DiscountRule {
     @Column(nullable = false)
     private Integer priority; // 1 = highest
 
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "rule_condition", columnDefinition = "TEXT")
     private String condition;
 
     @Column(nullable = false)
