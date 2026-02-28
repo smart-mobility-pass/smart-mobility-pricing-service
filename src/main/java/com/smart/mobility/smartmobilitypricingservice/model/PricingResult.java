@@ -26,7 +26,7 @@ public class PricingResult {
     private Long tripId;
 
     @Column(name = "user_id", nullable = false)
-    private Long userId;
+    private String userId;
 
     @Column(name = "transport_type", length = 10, nullable = false)
     private String transportType;
