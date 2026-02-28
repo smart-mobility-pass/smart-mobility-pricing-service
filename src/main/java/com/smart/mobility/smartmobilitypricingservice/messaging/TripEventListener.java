@@ -19,7 +19,7 @@ public class TripEventListener {
     public void handleTripCompletedEvent(TripCompletedEvent event) {
         log.info("Received TripCompletedEvent for tripId: {}", event.tripId());
         try {
-            pricingService.processTripCompleted(event);
+            pricingService.calculateAndProcessTrip(event);
         } catch (Exception e) {
             log.error("Error processing TripCompletedEvent for tripId: {}", event.tripId(), e);
             // In a production environment, we would use a dead-letter queue or retry
