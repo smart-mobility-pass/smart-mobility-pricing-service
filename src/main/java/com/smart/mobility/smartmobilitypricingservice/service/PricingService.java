@@ -2,11 +2,9 @@ package com.smart.mobility.smartmobilitypricingservice.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.smart.mobility.smartmobilitypricingservice.dto.AppliedDiscountDto;
+import com.smart.mobility.smartmobilitypricingservice.dto.*;
 import com.smart.mobility.smartmobilitypricingservice.model.DiscountRule;
 import com.smart.mobility.smartmobilitypricingservice.model.PricingResult;
-import com.smart.mobility.smartmobilitypricingservice.dto.TripCompletedEvent;
-import com.smart.mobility.smartmobilitypricingservice.dto.TripPricedEvent;
 import com.smart.mobility.smartmobilitypricingservice.repository.DiscountRuleRepository;
 import com.smart.mobility.smartmobilitypricingservice.repository.PricingResultRepository;
 import com.smart.mobility.smartmobilitypricingservice.proxy.UserServiceClient;
@@ -29,129 +27,179 @@ public class PricingService {
     private final DiscountRuleRepository discountRuleRepository;
     private final PricingResultRepository pricingResultRepository;
     private final UserServiceClient userServiceClient;
-    private final PricingEventPublisher pricingEventPublisher; // We will create this interface/class later
+    private final PricingEventPublisher pricingEventPublisher;
     private final ObjectMapper objectMapper;
 
     @Transactional
-    public void processTripCompleted(TripCompletedEvent event) {
-        log.info("Processing pricing for trip {}", event.tripId());
+    public PricingResponseDTO calculateAndProcessTrip(TripCompletedEvent event) {
+        log.info("Calculating dynamic pricing for trip {} and user {}", event.tripId(), event.userId());
 
-        // 1. Calculate Base Price
+        // 1. Récupération du résumé utilisateur (Abonnement, Cap journalier,
+        // Consommation actuelle)
+        UserMobilitySummaryDTO summary = fetchUserSummary(event.userId());
+
+        // 2. Calcul du tarif de base Dakar (BUS, TER, BRT)
         BigDecimal basePrice = calculateBasePrice(event);
 
-        // 2. Fetch User Subscription
-        String subscriptionType = fetchUserSubscription(event.userId());
-
-        // 3. Apply Discounts
+        // 3. Application des réductions en chaîne
         List<AppliedDiscountDto> appliedDiscounts = new ArrayList<>();
-        BigDecimal finalAmount = applyDiscounts(basePrice, subscriptionType, appliedDiscounts);
-        BigDecimal totalDiscountApplied = basePrice.subtract(finalAmount);
 
-        // 4. Save Pricing Result
-        String appliedDiscountsJson = "[]";
-        try {
-            appliedDiscountsJson = objectMapper.writeValueAsString(appliedDiscounts);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize applied discounts", e);
+        // a. Réduction par ABONNEMENT (déduite de User Service via Summary)
+        BigDecimal amountAfterSub = applySubscriptionDiscount(basePrice, summary, appliedDiscounts);
+
+        // b. Autres réductions stockées en BDD (OFFPEAK, LOYALTY, etc.)
+        BigDecimal amountAfterDatabaseRules = applyDatabaseDiscountRules(amountAfterSub, event, appliedDiscounts);
+
+        // 4. Gestion du Daily Cap (Plafond Journalier)
+        BigDecimal dailyCap = BigDecimal.valueOf(summary.getDailyCap());
+        BigDecimal currentSpent = BigDecimal.valueOf(summary.getCurrentSpent());
+        BigDecimal remainingCap = dailyCap.subtract(currentSpent).max(BigDecimal.ZERO);
+
+        BigDecimal finalAmount;
+        boolean capReached = false;
+
+        if (remainingCap.compareTo(BigDecimal.ZERO) <= 0) {
+            // Plafond déjà atteint : Trajet Gratuit
+            finalAmount = BigDecimal.ZERO;
+            capReached = true;
+            appliedDiscounts.add(AppliedDiscountDto.builder()
+                    .ruleType("DAILY_CAP")
+                    .percentage(BigDecimal.valueOf(100))
+                    .amountDeducted(amountAfterDatabaseRules)
+                    .build());
+        } else if (amountAfterDatabaseRules.compareTo(remainingCap) > 0) {
+            // Le trajet fait dépasser le plafond : On ne facture que le restant du plafond
+            BigDecimal capDiscount = amountAfterDatabaseRules.subtract(remainingCap);
+            finalAmount = remainingCap;
+            capReached = true;
+            appliedDiscounts.add(AppliedDiscountDto.builder()
+                    .ruleType("DAILY_CAP_LIMIT")
+                    .percentage(BigDecimal.ZERO)
+                    .amountDeducted(capDiscount)
+                    .build());
+        } else {
+            // Encore sous le plafond : Prix calculé conservé
+            finalAmount = amountAfterDatabaseRules;
         }
 
-        PricingResult pricingResult = PricingResult.builder()
-                .tripId(event.tripId())
-                .userId(event.userId())
-                .transportType(event.transportType())
+        BigDecimal totalDiscountApplied = basePrice.subtract(finalAmount);
+
+        // 5. Audit & Log du résultat
+        savePricingAudit(event, basePrice, totalDiscountApplied, finalAmount, appliedDiscounts);
+
+        // 6. Publication de l'événement pour Billing & Trip Management
+        publishTripPricedEvent(event, basePrice, finalAmount, appliedDiscounts);
+
+        return PricingResponseDTO.builder()
                 .basePrice(basePrice)
                 .discountApplied(totalDiscountApplied)
-                .finalAmount(finalAmount)
-                .appliedDiscounts(appliedDiscountsJson)
+                .finalPrice(finalAmount)
+                .capReached(capReached)
                 .build();
+    }
 
-        pricingResult = pricingResultRepository.save(pricingResult);
+    private BigDecimal applySubscriptionDiscount(BigDecimal price, UserMobilitySummaryDTO summary,
+            List<AppliedDiscountDto> discounts) {
+        if (summary.getActiveDiscountRate() > 0) {
+            BigDecimal rate = BigDecimal.valueOf(summary.getActiveDiscountRate());
+            BigDecimal amount = price.multiply(rate).setScale(2, RoundingMode.HALF_UP);
 
-        // 5. Publish Event
-        TripPricedEvent pricedEvent = TripPricedEvent.builder()
-                .tripId(event.tripId())
-                .userId(event.userId())
-                .basePrice(basePrice)
-                .appliedDiscounts(appliedDiscounts)
-                .finalAmount(finalAmount)
-                .build();
+            discounts.add(AppliedDiscountDto.builder()
+                    .ruleType("SUBSCRIPTION")
+                    .percentage(rate.multiply(BigDecimal.valueOf(100)))
+                    .amountDeducted(amount)
+                    .build());
 
-        pricingEventPublisher.publishTripPricedEvent(pricedEvent);
-        log.info("Finished pricing for trip {}. Final amount: {}", event.tripId(), finalAmount);
+            return price.subtract(amount);
+        }
+        return price;
+    }
+
+    private BigDecimal applyDatabaseDiscountRules(BigDecimal currentAmount, TripCompletedEvent event,
+            List<AppliedDiscountDto> appliedDiscounts) {
+        List<DiscountRule> activeRules = discountRuleRepository.findByActiveTrueOrderByPriorityAsc();
+        BigDecimal amount = currentAmount;
+
+        for (DiscountRule rule : activeRules) {
+            // On ignore SUBSCRIPTION ici, car géré via summary pour plus de précision temps
+            // réel
+            if ("SUBSCRIPTION".equalsIgnoreCase(rule.getRuleType()))
+                continue;
+
+            if (isRuleApplicable(rule, event)) {
+                BigDecimal percentage = rule.getPercentage();
+                BigDecimal discountFactor = percentage.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                BigDecimal deduction = amount.multiply(discountFactor).setScale(2, RoundingMode.HALF_UP);
+
+                appliedDiscounts.add(AppliedDiscountDto.builder()
+                        .ruleType(rule.getRuleType())
+                        .percentage(percentage)
+                        .amountDeducted(deduction)
+                        .build());
+
+                amount = amount.subtract(deduction);
+            }
+        }
+        return amount;
+    }
+
+    private boolean isRuleApplicable(DiscountRule rule, TripCompletedEvent event) {
+        // Logique simplifiée : ALL ou vide s'applique à tout
+        if (rule.getCondition() == null || rule.getCondition().isEmpty()
+                || "ALL".equalsIgnoreCase(rule.getCondition())) {
+            return true;
+        }
+        // Extension possible : vérifier transportType dans condition
+        return rule.getCondition().contains(event.transportType());
     }
 
     private BigDecimal calculateBasePrice(TripCompletedEvent event) {
-        int numberSection = event.numberOfSections() != null ? event.numberOfSections() : 0;
+        int sections = event.numberOfSections() != null ? event.numberOfSections() : 0;
         if ("BUS".equalsIgnoreCase(event.transportType())) {
-            // formula: 150 + (numberOfSections * 50)
-            return BigDecimal.valueOf(150 + (numberSection * 50L));
+            return BigDecimal.valueOf(150 + (sections * 50L));
         } else if ("TER".equalsIgnoreCase(event.transportType())) {
-            // formula: 500 + (numberOfSections * 500)
-            return BigDecimal.valueOf(500 + (numberSection * 500L));
+            return BigDecimal.valueOf(500 + (sections * 500L));
         } else if ("BRT".equalsIgnoreCase(event.transportType())) {
-            // formula: startZone == endZone ? 400 : 500
             int startZone = event.startZone() != null ? event.startZone() : -1;
             int endZone = event.endZone() != null ? event.endZone() : -1;
-            if (startZone == endZone && startZone != -1) {
-                return BigDecimal.valueOf(400);
-            } else {
-                return BigDecimal.valueOf(500);
-            }
+            return BigDecimal.valueOf((startZone == endZone && startZone != -1) ? 400 : 500);
         }
         return BigDecimal.ZERO;
     }
 
-    private String fetchUserSubscription(Long userId) {
+    private UserMobilitySummaryDTO fetchUserSummary(String userId) {
         try {
-            return userServiceClient.getActiveSubscription(userId);
+            return userServiceClient.getUserSummary(userId);
         } catch (Exception e) {
-            log.warn("Failed to fetch subscription for user {}, continuing without subscription discount", userId);
-            return "NONE";
+            log.warn("UserService injoignable pour {}, utilisation des valeurs par défaut", userId);
+            return UserMobilitySummaryDTO.builder()
+                    .hasActivePass(false)
+                    .dailyCap(25.0).currentSpent(0.0).activeDiscountRate(0.0)
+                    .build();
         }
     }
 
-    private BigDecimal applyDiscounts(BigDecimal currentAmount, String subscriptionType,
-            List<AppliedDiscountDto> appliedDiscounts) {
-        List<DiscountRule> activeRules = discountRuleRepository.findByActiveTrueOrderByPriorityAsc();
-
-        for (DiscountRule rule : activeRules) {
-            if ("SUBSCRIPTION".equalsIgnoreCase(rule.getRuleType())) {
-                boolean matches = rule.getCondition() != null
-                        && rule.getCondition().contains(subscriptionType != null ? subscriptionType : "");
-                if (matches) {
-                    currentAmount = applyRule(currentAmount, rule, appliedDiscounts);
-                }
-            } else {
-                // For other types like OFFPEAK or LOYALTY, we might need more event context or
-                // user details.
-                // For this implementation, we apply them if condition is basic or doesn't
-                // strictly exclude it.
-                // Assuming empty conditions mean applies to all, otherwise matching logic is
-                // required.
-                if (rule.getCondition() == null || rule.getCondition().isEmpty()
-                        || "ALL".equalsIgnoreCase(rule.getCondition())) {
-                    currentAmount = applyRule(currentAmount, rule, appliedDiscounts);
-                }
-            }
+    private void savePricingAudit(TripCompletedEvent event, BigDecimal base, BigDecimal disc, BigDecimal fin,
+            List<AppliedDiscountDto> list) {
+        try {
+            String json = objectMapper.writeValueAsString(list);
+            PricingResult result = PricingResult.builder()
+                    .tripId(event.tripId())
+                    .userId(event.userId())
+                    .transportType(event.transportType())
+                    .basePrice(base).discountApplied(disc).finalAmount(fin)
+                    .appliedDiscounts(json).build();
+            pricingResultRepository.save(result);
+        } catch (JsonProcessingException e) {
+            log.error("Audit pricing échoué", e);
         }
-        return currentAmount;
     }
 
-    private BigDecimal applyRule(BigDecimal currentAmount, DiscountRule rule,
-            List<AppliedDiscountDto> appliedDiscounts) {
-        BigDecimal percentage = rule.getPercentage();
-        if (percentage.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal discountFactor = percentage.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            BigDecimal discountAmount = currentAmount.multiply(discountFactor).setScale(2, RoundingMode.HALF_UP);
-
-            appliedDiscounts.add(AppliedDiscountDto.builder()
-                    .ruleType(rule.getRuleType())
-                    .percentage(percentage)
-                    .amountDeducted(discountAmount)
-                    .build());
-
-            return currentAmount.subtract(discountAmount);
-        }
-        return currentAmount;
+    private void publishTripPricedEvent(TripCompletedEvent event, BigDecimal base, BigDecimal fin,
+            List<AppliedDiscountDto> list) {
+        TripPricedEvent pricedEvent = TripPricedEvent.builder()
+                .tripId(event.tripId()).userId(event.userId())
+                .basePrice(base).appliedDiscounts(list).finalAmount(fin).build();
+        pricingEventPublisher.publishTripPricedEvent(pricedEvent);
     }
 }
