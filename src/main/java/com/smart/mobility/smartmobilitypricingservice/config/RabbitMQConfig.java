@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMQConfig {
 
     public static final String TRIP_EXCHANGE = "trip.exchange";
-    public static final String PRICING_QUEUE = "pricing.trip.completed.queue";
+    public static final String PRICING_QUEUE = "trip.completed.queue";
     public static final String TRIP_COMPLETED_ROUTING_KEY = "trip.completed";
     public static final String TRIP_PRICED_ROUTING_KEY = "trip.priced";
 
