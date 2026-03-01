@@ -79,7 +79,7 @@ public class PricingService {
                     .build());
         } else {
             // Encore sous le plafond : Prix calculé conservé
-            finalAmount = amountAfterDatabaseRules;
+            finalAmount = amountAfterDatabaseRules.max(BigDecimal.ZERO);
         }
 
         BigDecimal totalDiscountApplied = basePrice.subtract(finalAmount);
