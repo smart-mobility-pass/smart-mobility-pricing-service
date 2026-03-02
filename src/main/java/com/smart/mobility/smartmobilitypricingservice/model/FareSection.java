@@ -32,6 +32,9 @@ public class FareSection {
     @Column(name = "price_increment", precision = 10, scale = 2, nullable = false)
     private BigDecimal priceIncrement;
 
+    @Column(name = "station_name", length = 100)
+    private String stationName;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
