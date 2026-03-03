@@ -144,13 +144,33 @@ public class PricingService {
     }
 
     private boolean isRuleApplicable(DiscountRule rule, TripCompletedEvent event) {
-        // Logique simplifiée : ALL ou vide s'applique à tout
+        // 1. Vérification du type de transport (Condition)
+        boolean transportMatch = false;
         if (rule.getCondition() == null || rule.getCondition().isEmpty()
                 || "ALL".equalsIgnoreCase(rule.getCondition())) {
-            return true;
+            transportMatch = true;
+        } else if (rule.getCondition().contains(event.transportType())) {
+            transportMatch = true;
         }
-        // Extension possible : vérifier transportType dans condition
-        return rule.getCondition().contains(event.transportType());
+
+        if (!transportMatch)
+            return false;
+
+        // 2. Vérification des horaires (Heures creuses / Off-peak)
+        if (rule.getStartHour() != null && rule.getEndHour() != null) {
+            LocalTime tripTime = event.startTime().toLocalTime();
+
+            // Cas classique : 09:00 -> 17:00
+            if (rule.getStartHour().isBefore(rule.getEndHour())) {
+                return !tripTime.isBefore(rule.getStartHour()) && !tripTime.isAfter(rule.getEndHour());
+            }
+            // Cas nocturne : 22:00 -> 05:00
+            else {
+                return !tripTime.isBefore(rule.getStartHour()) || !tripTime.isAfter(rule.getEndHour());
+            }
+        }
+
+        return true;
     }
 
     private BigDecimal calculateBasePrice(TripCompletedEvent event) {

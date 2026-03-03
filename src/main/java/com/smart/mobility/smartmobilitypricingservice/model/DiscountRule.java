@@ -10,6 +10,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 @Entity
 @Table(name = "discount_rules")
@@ -34,6 +35,12 @@ public class DiscountRule {
 
     @Column(name = "rule_condition", columnDefinition = "TEXT")
     private String condition;
+
+    @Column(name = "start_hour")
+    private LocalTime startHour;
+
+    @Column(name = "end_hour")
+    private LocalTime endHour;
 
     @Column(nullable = false)
     private Boolean active;
