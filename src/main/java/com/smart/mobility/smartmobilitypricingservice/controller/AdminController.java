@@ -35,6 +35,24 @@ public class AdminController {
         return ResponseEntity.ok(transportLineRepository.findAll());
     }
 
+    @DeleteMapping("/transport-lines/{id}")
+    public ResponseEntity<Void> deleteTransportLine(@PathVariable Long id) {
+        transportLineRepository.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/transport-lines/{id}")
+    public ResponseEntity<TransportLine> updateTransportLine(@PathVariable Long id,
+            @RequestBody TransportLine transportLine) {
+        return transportLineRepository.findById(id)
+                .map(existingLine -> {
+                    existingLine.setName(transportLine.getName());
+                    existingLine.setTransportType(transportLine.getTransportType());
+                    return ResponseEntity.ok(transportLineRepository.save(existingLine));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     // --- Fare Section ---
     @PostMapping("/fare-sections")
     public ResponseEntity<FareSection> createFareSection(@RequestBody FareSection fareSection) {
@@ -46,6 +64,25 @@ public class AdminController {
         return ResponseEntity.ok(fareSectionRepository.findAll());
     }
 
+    @DeleteMapping("/fare-sections/{id}")
+    public ResponseEntity<Void> deleteFareSection(@PathVariable Long id) {
+        fareSectionRepository.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/fare-sections/{id}")
+    public ResponseEntity<FareSection> updateFareSection(@PathVariable Long id,
+            @RequestBody FareSection fareSection) {
+        return fareSectionRepository.findById(id)
+                .map(existingSection -> {
+                    existingSection.setLineId(fareSection.getLineId());
+                    existingSection.setSectionOrder(fareSection.getSectionOrder());
+                    existingSection.setStationName(fareSection.getStationName());
+                    existingSection.setZone(fareSection.getZone());
+                    return ResponseEntity.ok(fareSectionRepository.save(existingSection));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
     // --- Zone ---
     @PostMapping("/zones")
     public ResponseEntity<Zone> createZone(@RequestBody Zone zone) {
@@ -72,5 +109,22 @@ public class AdminController {
     public ResponseEntity<Void> deleteDiscountRule(@PathVariable Long id) {
         discountRuleRepository.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/discount-rules/{id}")
+    public ResponseEntity<DiscountRule> updateDiscountRule(@PathVariable Long id,
+            @RequestBody DiscountRule discountRule) {
+        return discountRuleRepository.findById(id)
+                .map(existingRule -> {
+                    existingRule.setRuleType(discountRule.getRuleType());
+                    existingRule.setPercentage(discountRule.getPercentage());
+                    existingRule.setPriority(discountRule.getPriority());
+                    existingRule.setCondition(discountRule.getCondition());
+                    existingRule.setStartHour(discountRule.getStartHour());
+                    existingRule.setEndHour(discountRule.getEndHour());
+                    existingRule.setActive(discountRule.getActive());
+                    return ResponseEntity.ok(discountRuleRepository.save(existingRule));
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 }
