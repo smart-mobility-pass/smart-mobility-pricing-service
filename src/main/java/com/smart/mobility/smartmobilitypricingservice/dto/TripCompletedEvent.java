@@ -5,12 +5,12 @@ import java.time.LocalDateTime;
 
 @Builder
 public record TripCompletedEvent(
-                Long tripId,
-                String userId,
-                String transportType,
-                Integer numberOfSections,
-                Integer startZone,
-                Integer endZone,
-                LocalDateTime startTime,
-                LocalDateTime endTime) {
+        Long tripId,
+        String userId,
+        String transportType,
+        Long transportLineId,
+        String startLocation,
+        String endLocation,
+        LocalDateTime startTime,
+        LocalDateTime endTime) {
 }
