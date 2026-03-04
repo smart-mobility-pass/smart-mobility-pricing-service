@@ -6,9 +6,10 @@ import java.util.List;
 
 @Builder
 public record TripPricedEvent(
-                Long tripId,
-                String userId,
-                BigDecimal basePrice,
-                List<AppliedDiscountDto> appliedDiscounts,
-                BigDecimal finalAmount) {
+        Long tripId,
+        String userId,
+        BigDecimal basePrice,
+        List<AppliedDiscountDto> appliedDiscounts,
+        BigDecimal finalAmount,
+        boolean penalty) {
 }
