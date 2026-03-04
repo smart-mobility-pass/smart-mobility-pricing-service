@@ -154,6 +154,14 @@ public class PricingService {
     }
 
     /**
+     * Récupère le résultat de tarification pour un trajet donné.
+     */
+    @Transactional(readOnly = true)
+    public PricingResult getPricingByTripId(Long tripId) {
+        return pricingResultRepository.findByTripId(tripId).orElse(null);
+    }
+
+    /**
      * Applique la meilleure réduction d'abonnement disponible.
      */
     private BigDecimal applySubscriptionDiscount(BigDecimal price, TripCompletedEvent event, PricingContextDTO summary,
