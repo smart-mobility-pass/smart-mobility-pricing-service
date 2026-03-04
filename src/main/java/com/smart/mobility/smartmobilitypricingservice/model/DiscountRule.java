@@ -9,6 +9,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 
@@ -41,6 +42,18 @@ public class DiscountRule {
 
     @Column(name = "end_hour")
     private LocalTime endHour;
+
+    @Column(name = "start_day")
+    private Integer startDay; // 1 = Monday, 7 = Sunday
+
+    @Column(name = "end_day")
+    private Integer endDay;
+
+    @Column(name = "start_date")
+    private LocalDate startDate;
+
+    @Column(name = "end_date")
+    private LocalDate endDate;
 
     @Column(nullable = false)
     private Boolean active;
